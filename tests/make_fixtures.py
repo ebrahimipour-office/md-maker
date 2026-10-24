@@ -11,7 +11,19 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 
 FIXTURES = Path(__file__).parent / "fixtures"
-FONT = "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf"
+FONT = next(
+    (
+        f
+        for f in [
+            "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf",
+            r"C:\Windows\Fonts\tahoma.ttf",  # ships with Windows, has Persian glyphs
+        ]
+        if Path(f).exists()
+    ),
+    None,
+)
+if FONT is None:
+    raise SystemExit("no Persian-capable font found; install fonts-noto (Linux)")
 
 TITLE = "گزارش ماهانه پروژه"
 PARAGRAPHS = [

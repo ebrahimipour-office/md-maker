@@ -7,17 +7,24 @@ Two engines:
 - "layout": pymupdf4llm, best for left-to-right documents (columns, tables).
 """
 
+import contextlib
+import io
+import os
 import re
-import shutil
 import sys
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 
 import pymupdf
 
 from . import normalize as nz
+from . import ocr as ocr_data
+
+pymupdf.set_messages(stream=sys.stderr)  # MuPDF warnings must not mix into --stdout
 
 OCR_MIN_CHARS = 20  # a page with less text than this is treated as scanned
+OCR_DPI = 400  # 300 recognised far fewer Persian words in testing
 
 
 @dataclass
@@ -37,8 +44,8 @@ class Table:
     rows: list[list[str]] = field(default_factory=list)
 
 
-def has_tesseract() -> bool:
-    return shutil.which("tesseract") is not None
+def has_ocr(lang: str = "fas+eng") -> bool:
+    return not ocr_data.missing_langs(lang)
 
 
 def _warn(msg: str):
@@ -73,6 +80,10 @@ def _visual_lines(lines: list[dict]) -> list[str]:
             groups.append([line])
     out = []
     for g in groups:
+        if g[0].get("ocr"):
+            if text := _ocr_line_text(g):
+                out.append(text)
+            continue
         texts = [(l["bbox"][0], _fragment_text(l)) for l in g]
         rtl = nz.is_rtl("".join(t for _, t in texts))
         texts.sort(key=lambda t: t[0], reverse=rtl)
@@ -82,29 +93,69 @@ def _visual_lines(lines: list[dict]) -> list[str]:
     return out
 
 
+def _ocr_words(group: list[dict]) -> list[tuple[float, str]]:
+    """(x centre, text) of each OCR word, in Tesseract's character order."""
+    words, cur = [], []
+    for c in (c for l in group for s in l["spans"] for c in s["chars"]):
+        if c["c"].isspace():
+            words.append(cur)
+            cur = []
+        else:
+            cur.append(c)
+    words.append(cur)
+    out = []
+    for w in filter(None, words):
+        x0 = min(c["bbox"][0] for c in w)
+        x1 = max(c["bbox"][2] for c in w)
+        text = nz.normalize_chars(unicodedata.normalize("NFKC", "".join(c["c"] for c in w)))
+        out.append(((x0 + x1) / 2, text))
+    return out
+
+
+def _ocr_line_text(group: list[dict]) -> str:
+    """Rebuild an OCR'd line in reading order.
+
+    Tesseract (via MuPDF) emits the runs of a mixed Persian/English line in
+    a scrambled order and sometimes reads a whole line backwards. Word
+    boxes are reliable, so order words by position, then flip the letters
+    if the line's common words come out reversed.
+    """
+    words = _ocr_words(group)
+    rtl = nz.is_rtl("".join(t for _, t in words))
+    words.sort(key=lambda w: w[0], reverse=rtl)
+    texts = [t for _, t in words]
+    if rtl and nz.words_look_reversed(texts):
+        texts = [t[::-1].translate(nz.MIRROR) if nz.is_rtl(t) else t for t in texts]
+    return " ".join(texts)
+
+
 def _ocr_textpage(page, lang: str, dpi: int):
     try:
-        return page.get_textpage_ocr(language=lang, dpi=dpi, full=True)
+        return page.get_textpage_ocr(
+            language=lang, dpi=dpi, full=True, tessdata=ocr_data.find_tessdata()
+        )
     except Exception as e:  # missing language data, bad tessdata path, ...
         _warn(f"OCR failed on page {page.number + 1}: {e}")
         return None
 
 
-def _page_dict(page, ocr: str, lang: str):
+def _page_dict(page, ocr: str, lang: str, dpi: int):
     textpage = None
     scanned = len(page.get_text("text").strip()) < OCR_MIN_CHARS
     if ocr == "always" or (ocr == "auto" and scanned):
-        if has_tesseract():
-            textpage = _ocr_textpage(page, lang, 300)
+        if has_ocr(lang):
+            textpage = _ocr_textpage(page, lang, dpi)
         elif scanned and page.get_images():
+            missing = "+".join(ocr_data.missing_langs(lang))
             _warn(
-                f"page {page.number + 1} looks scanned but tesseract is not installed "
-                "(sudo apt install tesseract-ocr tesseract-ocr-fas)"
+                f"page {page.number + 1} looks scanned but there is no OCR data for "
+                f"{missing}; {ocr_data.install_hint()}"
             )
     flags = pymupdf.TEXT_PRESERVE_WHITESPACE | pymupdf.TEXT_MEDIABOX_CLIP
     raw = page.get_text("rawdict", flags=flags, textpage=textpage)
     for b in raw["blocks"]:
         for l in b.get("lines", []):
+            l["ocr"] = textpage is not None
             for s in l["spans"]:
                 s["text"] = "".join(c["c"] for c in s["chars"])
     return raw
@@ -269,11 +320,11 @@ def _render_table(t: Table, spacing: bool) -> str:
     return "\n".join(lines)
 
 
-def _rtl_markdown(doc, ocr: str, lang: str, spacing: bool, page_markers: bool) -> str:
+def _rtl_markdown(doc, ocr: str, lang: str, dpi: int, spacing: bool, page_markers: bool) -> str:
     blocks: list[Block] = []
     tables: list[Table] = []
     for page in doc:
-        words_dict = _page_dict(page, ocr, lang)
+        words_dict = _page_dict(page, ocr, lang, dpi)
         page_tables = _extract_tables(page, words_dict, page.number)
         tables += page_tables
         blocks += _extract_blocks(words_dict, page_tables, page.number)
@@ -303,18 +354,30 @@ def _rtl_markdown(doc, ocr: str, lang: str, spacing: bool, page_markers: bool) -
     return "\n\n".join(out) + "\n"
 
 
-def _layout_markdown(path, ocr: str, lang: str, page_markers: bool) -> str:
+def _layout_markdown(path, ocr: str, lang: str, dpi: int, page_markers: bool) -> str:
     import pymupdf4llm
 
-    use_ocr = ocr != "never" and has_tesseract()
-    return pymupdf4llm.to_markdown(
-        str(path),
-        use_ocr=use_ocr,
-        force_ocr=use_ocr and ocr == "always",
-        ocr_language=lang,
-        page_separators=page_markers,
-        show_progress=False,
-    )
+    use_ocr = ocr != "never" and has_ocr(lang)
+    if use_ocr:
+        # pymupdf4llm finds the language data through this variable
+        os.environ.setdefault("TESSDATA_PREFIX", ocr_data.find_tessdata())
+    # pymupdf4llm prints status chatter ("RapidOCR is missing", ...) to
+    # stdout, which would end up in `--stdout` output: swallow it.
+    chatter = io.StringIO()
+    pymupdf.set_messages(stream=chatter)
+    try:
+        with contextlib.redirect_stdout(chatter):
+            return pymupdf4llm.to_markdown(
+                str(path),
+                use_ocr=use_ocr,
+                force_ocr=use_ocr and ocr == "always",
+                ocr_language=lang,
+                ocr_dpi=dpi,
+                page_separators=page_markers,
+                show_progress=False,
+            )
+    finally:
+        pymupdf.set_messages(stream=sys.stderr)
 
 
 def detect_rtl(doc, sample_pages: int = 10) -> bool:
@@ -328,6 +391,7 @@ def pdf_to_markdown(
     engine: str = "auto",
     ocr: str = "auto",
     lang: str = "fas+eng",
+    ocr_dpi: int = OCR_DPI,
     spacing: bool = True,
     page_markers: bool = False,
 ) -> str:
@@ -340,10 +404,10 @@ def pdf_to_markdown(
         has_text = any(len(p.get_text("text").strip()) >= OCR_MIN_CHARS for p in doc)
         engine = "rtl" if (detect_rtl(doc) if has_text else re.search(r"fas|ara|urd", lang)) else "layout"
     if engine == "rtl":
-        md = _rtl_markdown(doc, ocr, lang, spacing, page_markers)
+        md = _rtl_markdown(doc, ocr, lang, ocr_dpi, spacing, page_markers)
     else:
-        md = nz.normalize_chars(_layout_markdown(path, ocr, lang, page_markers))
+        md = nz.normalize_chars(_layout_markdown(path, ocr, lang, ocr_dpi, page_markers))
     if not md.strip():
-        hint = "" if has_tesseract() else "; if it is scanned, install tesseract-ocr tesseract-ocr-fas"
+        hint = "" if has_ocr(lang) else f"; if it is scanned, {ocr_data.install_hint()}"
         raise ValueError(f"no text extracted{hint}")
     return md

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from md_maker import main, office_to_markdown, pdf_to_markdown
-from md_maker.pdf import has_tesseract
+from md_maker.pdf import has_ocr
 
 FIXTURES = Path(__file__).parent / "fixtures"
 ZWNJ = "‌"
@@ -50,15 +50,18 @@ def test_english_pdf_uses_layout_engine():
     assert "Quarterly Report" in md and "- First point" in md
 
 
-@pytest.mark.skipif(not has_tesseract(), reason="tesseract not installed")
+@pytest.mark.skipif(not has_ocr(), reason="no OCR data (md-maker --install-ocr)")
 def test_scanned_pdf_ocr():
     md = pdf_to_markdown(FIXTURES / "persian_scanned.pdf")
-    assert "گزارش" in md
+    # OCR is imperfect; check reading order on lines Tesseract gets right
+    assert "گزارش ماهانه" in md
+    assert "این یک متن آزمایشی به زبان فارسی است" in md
+    assert "مورد اول فهرست" in md
 
 
-@pytest.mark.skipif(has_tesseract(), reason="tesseract installed")
+@pytest.mark.skipif(has_ocr(), reason="OCR data installed")
 def test_scanned_pdf_without_ocr_fails_clearly():
-    with pytest.raises(ValueError, match="tesseract"):
+    with pytest.raises(ValueError, match="install-ocr"):
         pdf_to_markdown(FIXTURES / "persian_scanned.pdf")
 
 
@@ -73,6 +76,11 @@ def test_cli_single_file_output(tmp_path):
     assert main([str(FIXTURES / "english.pdf"), "-o", str(out), "-q"]) == 0
     text = out.read_text()
     assert "# Quarterly Report" in text and " \n" not in text
+
+
+def test_cli_stdout_has_only_markdown(capsys):
+    assert main([str(FIXTURES / "english.pdf"), "--stdout"]) == 0
+    assert capsys.readouterr().out.startswith("# Quarterly Report")
 
 
 def test_cli_rtl_wrap(capsys):

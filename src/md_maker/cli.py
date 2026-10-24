@@ -6,8 +6,9 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from . import ocr
 from .office import FORMATS, office_to_markdown
-from .pdf import pdf_to_markdown
+from .pdf import OCR_DPI, pdf_to_markdown
 
 SUPPORTED = {".pdf", *FORMATS}
 
@@ -26,6 +27,7 @@ def convert(path: Path, args) -> str:
             engine=args.engine,
             ocr=args.ocr,
             lang=args.lang,
+            ocr_dpi=args.ocr_dpi,
             spacing=not args.no_fix_spacing,
             page_markers=args.page_markers,
         )
@@ -67,20 +69,48 @@ def _size(n: int) -> str:
     return f"{n / 1024:.1f} KB" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} MB"
 
 
+def _launched_from_explorer() -> bool:
+    """True on Windows when md-maker.exe got its own console window, i.e. a
+    file was dropped onto it or it was double-clicked, not run in a terminal."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        return ctypes.windll.kernel32.GetConsoleProcessList((ctypes.c_uint * 2)(), 2) == 1
+    except Exception:
+        return False
+
+
 def main(argv=None) -> int:
+    if not _launched_from_explorer():
+        return _main(argv)
+    try:
+        return _main(argv)
+    except SystemExit as e:  # argparse errors / --help
+        return e.code if isinstance(e.code, int) else 1
+    finally:
+        input("\nPress Enter to close...")
+
+
+def _main(argv=None) -> int:
     p = argparse.ArgumentParser(
         prog="md-maker",
         description="Convert PDF and DOCX (also ODT, RTF, EPUB, HTML) to Markdown. "
         "Handles Persian/Arabic text and OCRs scanned PDFs.",
     )
-    p.add_argument("inputs", nargs="+", type=Path, help="files or folders")
+    p.add_argument("inputs", nargs="*", type=Path, help="files or folders")
     p.add_argument("-o", "--output", type=Path, help="output .md file (one input) or folder")
     p.add_argument("--stdout", action="store_true", help="print Markdown instead of writing files")
     p.add_argument("--engine", choices=["auto", "rtl", "layout"], default="auto",
                    help="PDF engine: rtl = Persian-aware, layout = pymupdf4llm (default: auto-detect)")
     p.add_argument("--ocr", choices=["auto", "always", "never"], default="auto",
-                   help="OCR scanned pages (needs tesseract; default: auto)")
+                   help="OCR scanned pages (needs OCR data, see --install-ocr; default: auto)")
     p.add_argument("--lang", default="fas+eng", help="tesseract OCR languages (default: fas+eng)")
+    p.add_argument("--ocr-dpi", type=int, default=OCR_DPI,
+                   help=f"render resolution for OCR; try 150-400 if results are poor (default: {OCR_DPI})")
+    p.add_argument("--install-ocr", action="store_true",
+                   help=f"download OCR data for --lang into {ocr.user_tessdata()} and exit")
     p.add_argument("--no-fix-spacing", action="store_true",
                    help="don't restore Persian half-spaces (می‌شود, کتاب‌ها) in PDFs")
     p.add_argument("--page-markers", action="store_true", help="mark page boundaries in PDF output")
@@ -88,6 +118,17 @@ def main(argv=None) -> int:
     p.add_argument("--media", type=Path, help="extract DOCX images into this folder")
     p.add_argument("-q", "--quiet", action="store_true")
     args = p.parse_args(argv)
+
+    # Windows consoles default to a legacy code page that can't print Persian.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+    if args.install_ocr:
+        print(f"OCR data ready in {ocr.install(args.lang.split('+'))}")
+        return 0
+    if not args.inputs:
+        p.error("give at least one file or folder")
 
     files = collect(args.inputs)
     if not files:

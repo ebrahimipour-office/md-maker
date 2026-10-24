@@ -1,18 +1,43 @@
 # md-maker
 
 Convert PDF and DOCX files (also ODT, RTF, EPUB, HTML) to clean Markdown on
-Ubuntu, with proper Persian support. Conversion runs locally, so an AI
-assistant only reads the small `.md` result instead of the original file.
+Linux and Windows, with proper Persian support. Conversion runs locally, so
+an AI assistant only reads the small `.md` result instead of the original file.
 
 ## Install
 
+Each installer sets up the `md-maker` command, Persian + English OCR data,
+and the Claude Code skill (`skill/md-maker`, copied to `~/.claude/skills`).
+No admin rights, system pandoc or Tesseract needed: pandoc is bundled
+(`pypandoc-binary`) and MuPDF has Tesseract built in, so OCR only needs the
+language data that `md-maker --install-ocr` downloads.
+
+**Linux**
+
 ```bash
-uv tool install --editable .          # puts `md-maker` on your PATH
-# optional, for scanned PDFs:
-sudo apt install tesseract-ocr tesseract-ocr-fas
+scripts/install-linux.sh
 ```
 
-pandoc is bundled (`pypandoc-binary`), so no system pandoc is needed.
+**Windows** (PowerShell, from the project folder)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
+```
+
+### Standalone Windows app (no Python on the target PC)
+
+On a Windows machine with this folder:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
+```
+
+This produces `dist\md-maker-windows-amd64.zip`, about 190 MB, mostly pandoc
+and the PDF layout model. Unzip it anywhere and run `md-maker\md-maker.exe`
+from a terminal, or drag files onto it in Explorer; the window stays open
+to show the result. OCR data is bundled inside. PyInstaller can't
+cross-compile, so the Windows build must run on Windows. The same
+`scripts/build.py` builds a Linux bundle on Linux.
 
 ## Use
 
@@ -21,6 +46,7 @@ md-maker report.pdf                 # -> report.md next to it
 md-maker contract.docx -o out.md
 md-maker docs/ -o markdown/         # whole folder, keeps sub-folders
 md-maker scan.pdf --ocr always      # force OCR
+md-maker scan.pdf --ocr-dpi 150     # retry OCR at another resolution
 md-maker file.pdf --stdout          # print instead of writing
 md-maker file.pdf --rtl-wrap        # wrap in <div dir="rtl"> for viewers
 ```
@@ -40,7 +66,10 @@ Other options: `--engine rtl|layout`, `--lang fas+eng`, `--page-markers`,
     detects headings by font size, turns bullets into lists, and drops
     running headers/footers and page numbers.
   - Other documents use `pymupdf4llm` (layout analysis, multi-column, tables).
-  - Pages with no text layer are OCR'd with tesseract when it is installed.
+  - Pages with no text layer are OCR'd (MuPDF's built-in Tesseract). OCR data
+    is looked up in `$TESSDATA_PREFIX`, next to a standalone executable, in
+    the per-user folder filled by `--install-ocr`, then in an installed
+    Tesseract (`src/md_maker/ocr.py`).
 
 ### Persian fixes (`src/md_maker/normalize.py`)
 
@@ -53,9 +82,13 @@ Other options: `--engine rtl|layout`, `--lang fas+eng`, `--page-markers`,
 | Whole text in visual order (reversed) | detected via common words, un-reversed |
 | Arabic `ي ك`, Arabic digits, kashida, bidi control marks | unified / removed |
 
-Known limit: a half-space that a PDF turned into a plain space inside a
-compound word (`نرم افزار`) can't be told apart from a real space, so it stays
-as a space.
+Known limits:
+- A half-space that a PDF turned into a plain space inside a compound word
+  (`نرم افزار`) can't be told apart from a real space, so it stays a space.
+- OCR of Persian scans is usable but imperfect. Recognition quality swings
+  with `--ocr-dpi` (in testing, 300 lost whole lines while 150 and 400 did
+  not), Latin words inside Persian lines are often misread, and tables in
+  scanned images are not reconstructed.
 
 ## Tests
 

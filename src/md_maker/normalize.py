@@ -44,7 +44,7 @@ _MIRRORED_RE = re.compile(r"\)([^()\n]*)\(")
 _COMMON = ["از", "به", "در", "که", "این", "را", "با", "است", "برای", "آن", "یک", "تا", "شده", "می"]
 _COMMON_REVERSED = {w[::-1] for w in _COMMON}
 _LTR_RUN_RE = re.compile(r"[A-Za-z0-9۰-۹](?:[A-Za-z0-9۰-۹.,:/_%@+\-]*[A-Za-z0-9۰-۹])?")
-_MIRROR = str.maketrans("()[]{}<>", ")(][}{><")
+MIRROR = str.maketrans("()[]{}<>", ")(][}{><")
 
 
 def rtl_ratio(text: str) -> float:
@@ -121,15 +121,24 @@ def clean_pdf_span(text: str) -> str:
     return normalize_chars(text)
 
 
+def _common_counts(text: str) -> tuple[int, int]:
+    words = re.findall(f"[{_ARABIC_LETTER}]+", text)
+    return sum(w in _COMMON for w in words), sum(w in _COMMON_REVERSED for w in words)
+
+
 def looks_reversed(text: str) -> bool:
     """True when common Persian words mostly appear spelled backwards."""
-    words = re.findall(f"[{_ARABIC_LETTER}]+", text)
-    normal = sum(w in _COMMON for w in words)
-    reversed_ = sum(w in _COMMON_REVERSED for w in words)
+    normal, reversed_ = _common_counts(text)
     return reversed_ >= 3 and reversed_ > 2 * normal
+
+
+def words_look_reversed(words: list[str]) -> bool:
+    """Per-line variant for OCR output: any reversed evidence that wins."""
+    normal, reversed_ = _common_counts(" ".join(words))
+    return reversed_ > normal
 
 
 def unreverse_line(line: str) -> str:
     """Convert a visual-order RTL line to logical order, keeping LTR runs intact."""
-    flipped = line[::-1].translate(_MIRROR)
+    flipped = line[::-1].translate(MIRROR)
     return _LTR_RUN_RE.sub(lambda m: m.group(0)[::-1], flipped)
