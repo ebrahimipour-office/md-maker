@@ -15,14 +15,23 @@ Never read a PDF/DOCX directly; that costs many more tokens than the Markdown ve
 2. Read the resulting `.md`. For large files, check its size first and read
    only the sections you need (search for the `#` headings).
 
+By default md-maker sends hard PDF pages (tables, scans, mixed
+Persian/English, columns, figures) to Claude through the `claude` CLI,
+picking the model per page; progress and cost go to stderr. Results are
+cached, so converting the same file again is free.
+
 Options worth knowing:
-- `--ocr always` if the output looks empty or garbled and the PDF is scanned.
-  If md-maker reports missing OCR data, run `md-maker --install-ocr` once.
-- `--ocr-dpi 150` (or 300) when OCR output of a scan is poor; results vary
-  with resolution.
-- `--engine layout` or `--engine rtl` to override the auto-detected PDF engine
-  if the output order looks wrong.
+- `--plan` first for a big PDF: shows which pages would go to which model,
+  without converting.
+- `--ai off` for a quick, free, local-only look; `--ai max` when the smart
+  result is still wrong on pages the triage judged clean.
+- `--report` writes `<name>.report.json`; pages with `"source": "local"`
+  and an `error`, or a low `score`, are the ones to double-check.
+- `--budget USD` to cap AI spending for the run (default from settings, $2).
 - `--page-markers` when you need to cite page numbers.
+- `--engine layout` or `--engine rtl` to override the auto-detected local PDF
+  engine if the output order looks wrong.
+- Without AI, scans need local OCR data: `md-maker --install-ocr` once.
 
 If `md-maker` is not installed, tell the user to run the installer in the
 md-maker project: `scripts/install-linux.sh` or `scripts\install-windows.ps1`.

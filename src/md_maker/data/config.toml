@@ -1,0 +1,56 @@
+# md-maker settings. Files are read in this order, later ones win:
+#   1. the user file (`md-maker --show-config` prints its path)
+#   2. ./md-maker.toml in the current folder
+#   3. --config FILE (or $MD_MAKER_CONFIG)
+# then command-line flags. Only list the keys you want to change.
+
+[ai]
+# smart: AI only on pages the local triage flags (tables, scans, mixed
+#        Persian/English, columns, figures, Persian half-space cleanup)
+# max:   every PDF page goes to AI
+# off:   local conversion only
+mode = "smart"
+backend = "claude-cli"
+claude_path = ""          # empty = find `claude` on PATH
+concurrency = 4           # pages sent to AI in parallel
+budget_usd = 2.0          # per run, as reported by the CLI; 0 = unlimited
+timeout_s = 300           # per AI call
+image_dpi = 150           # page render resolution sent to the model
+image_max_side = 1600     # pixels; larger renders are scaled down
+
+[ai.models]               # aliases resolve to the latest model of that family
+polish = "haiku"          # text-only cleanup of an already good draft
+repair = "sonnet"         # page image + local draft -> corrected Markdown
+transcribe = "sonnet"     # page image only (scans, broken text layer)
+escalate = "opus"         # retry when a result fails verification
+
+[ai.effort]
+polish = "low"
+repair = "medium"
+transcribe = "medium"
+escalate = "medium"
+
+[ai.routing]
+polish_rtl = true         # send plain Persian/Arabic pages to `polish`
+figures = true            # send pages with figures to `repair` (for figure notes)
+garbage_ratio = 0.02      # share of broken characters that makes a text layer unusable
+mixed_script_lines = 3    # lines mixing Persian and Latin that trigger `repair`
+min_verify_score = 0.85   # below this, retry with the `escalate` model
+
+[pdf]
+engine = "auto"           # auto | rtl | layout
+page_markers = false
+fix_spacing = true
+
+[ocr]
+mode = "auto"             # auto | always | never (local Tesseract)
+lang = "fas+eng"
+dpi = 400
+
+[output]
+rtl_wrap = false
+figure_notes = true       # AI adds a one-line description of each figure
+
+[cache]
+enabled = true
+dir = ""                  # empty = per-user cache folder

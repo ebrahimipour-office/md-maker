@@ -320,7 +320,7 @@ def _render_table(t: Table, spacing: bool) -> str:
     return "\n".join(lines)
 
 
-def _rtl_markdown(doc, ocr: str, lang: str, dpi: int, spacing: bool, page_markers: bool) -> str:
+def _rtl_pages(doc, ocr: str, lang: str, dpi: int, spacing: bool) -> list[str]:
     blocks: list[Block] = []
     tables: list[Table] = []
     for page in doc:
@@ -340,21 +340,19 @@ def _rtl_markdown(doc, ocr: str, lang: str, dpi: int, spacing: bool, page_marker
 
     # Keep pymupdf's reading order; slot each table in before the first
     # block that starts below it on the same page.
-    out: list[str] = []
+    pages: list[list[str]] = [[] for _ in range(len(doc))]
     pending = sorted(tables, key=lambda t: (t.page, t.bbox[1]))
-    page = -1
     for b in blocks:
         while pending and (pending[0].page, pending[0].bbox[1]) < (b.page, b.bbox[1]):
-            out.append(_render_table(pending.pop(0), spacing))
-        if page_markers and b.page != page:
-            out.append(f"<!-- page {b.page + 1} -->")
-        page = b.page
-        out.append(_render_block(b, spacing))
-    out += [_render_table(t, spacing) for t in pending]
-    return "\n\n".join(out) + "\n"
+            t = pending.pop(0)
+            pages[t.page].append(_render_table(t, spacing))
+        pages[b.page].append(_render_block(b, spacing))
+    for t in pending:
+        pages[t.page].append(_render_table(t, spacing))
+    return ["\n\n".join(p) for p in pages]
 
 
-def _layout_markdown(path, ocr: str, lang: str, dpi: int, page_markers: bool) -> str:
+def _layout_pages(path, ocr: str, lang: str, dpi: int) -> list[str]:
     import pymupdf4llm
 
     use_ocr = ocr != "never" and has_ocr(lang)
@@ -367,22 +365,65 @@ def _layout_markdown(path, ocr: str, lang: str, dpi: int, page_markers: bool) ->
     pymupdf.set_messages(stream=chatter)
     try:
         with contextlib.redirect_stdout(chatter):
-            return pymupdf4llm.to_markdown(
+            chunks = pymupdf4llm.to_markdown(
                 str(path),
                 use_ocr=use_ocr,
                 force_ocr=use_ocr and ocr == "always",
                 ocr_language=lang,
                 ocr_dpi=dpi,
-                page_separators=page_markers,
+                page_chunks=True,
                 show_progress=False,
             )
     finally:
         pymupdf.set_messages(stream=sys.stderr)
+    return [nz.normalize_chars(c["text"]).strip() for c in chunks]
 
 
 def detect_rtl(doc, sample_pages: int = 10) -> bool:
     text = "".join(doc[i].get_text("text") for i in range(min(len(doc), sample_pages)))
     return nz.rtl_ratio(text) > 0.3
+
+
+def resolve_engine(doc, engine: str, lang: str) -> str:
+    if engine != "auto":
+        return engine
+    # Scanned docs have no text to detect from; OCR them with our engine
+    # when the requested language is Persian/Arabic.
+    has_text = any(len(p.get_text("text").strip()) >= OCR_MIN_CHARS for p in doc)
+    return "rtl" if (detect_rtl(doc) if has_text else re.search(r"fas|ara|urd", lang)) else "layout"
+
+
+def pdf_pages(
+    path,
+    *,
+    engine: str = "auto",
+    ocr: str = "auto",
+    lang: str = "fas+eng",
+    ocr_dpi: int = OCR_DPI,
+    spacing: bool = True,
+) -> list[str]:
+    """Markdown of each page, in page order (empty string for a blank page)."""
+    doc = pymupdf.open(path)
+    if doc.needs_pass:
+        raise ValueError("PDF is password-protected")
+    if resolve_engine(doc, engine, lang) == "rtl":
+        return _rtl_pages(doc, ocr, lang, ocr_dpi, spacing)
+    return _layout_pages(path, ocr, lang, ocr_dpi)
+
+
+def join_pages(pages: list[str], page_markers: bool = False) -> str:
+    out = []
+    for i, md in enumerate(pages):
+        if md.strip():
+            out.append(f"<!-- page {i + 1} -->\n\n{md}" if page_markers else md)
+    return "\n\n".join(out) + "\n"
+
+
+def render_page_png(page, dpi: int, max_side: int) -> bytes:
+    """The page as a PNG for a vision model, at most max_side pixels long."""
+    longest = max(page.rect.width, page.rect.height) / 72
+    dpi = min(dpi, int(max_side / longest)) if longest else dpi
+    return page.get_pixmap(dpi=dpi).tobytes("png")
 
 
 def pdf_to_markdown(
@@ -395,19 +436,13 @@ def pdf_to_markdown(
     spacing: bool = True,
     page_markers: bool = False,
 ) -> str:
-    doc = pymupdf.open(path)
-    if doc.needs_pass:
-        raise ValueError("PDF is password-protected")
-    if engine == "auto":
-        # Scanned docs have no text to detect from; OCR them with our engine
-        # when the requested language is Persian/Arabic.
-        has_text = any(len(p.get_text("text").strip()) >= OCR_MIN_CHARS for p in doc)
-        engine = "rtl" if (detect_rtl(doc) if has_text else re.search(r"fas|ara|urd", lang)) else "layout"
-    if engine == "rtl":
-        md = _rtl_markdown(doc, ocr, lang, ocr_dpi, spacing, page_markers)
-    else:
-        md = nz.normalize_chars(_layout_markdown(path, ocr, lang, ocr_dpi, page_markers))
+    pages = pdf_pages(path, engine=engine, ocr=ocr, lang=lang, ocr_dpi=ocr_dpi, spacing=spacing)
+    md = join_pages(pages, page_markers)
     if not md.strip():
-        hint = "" if has_ocr(lang) else f"; if it is scanned, {ocr_data.install_hint()}"
-        raise ValueError(f"no text extracted{hint}")
+        raise ValueError(no_text_message(lang))
     return md
+
+
+def no_text_message(lang: str) -> str:
+    hint = "" if has_ocr(lang) else f"; if it is scanned, {ocr_data.install_hint()}"
+    return f"no text extracted{hint}"

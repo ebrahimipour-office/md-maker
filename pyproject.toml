@@ -1,7 +1,7 @@
 [project]
 name = "md-maker"
-version = "0.1.0"
-description = "Convert PDF and DOCX files to token-cheap Markdown, with Persian support"
+version = "0.2.0"
+description = "Convert PDF and DOCX files to token-cheap Markdown, with Persian support and Claude-assisted repair of hard pages"
 readme = "README.md"
 authors = [
     { name = "ebrahimipour", email = "ebrahimipour@gmail.com" }
