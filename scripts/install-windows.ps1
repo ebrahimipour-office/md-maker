@@ -25,4 +25,11 @@ New-Item -ItemType Directory -Force -Path $skills | Out-Null
 Copy-Item -Recurse -Force (Join-Path $repo "skill\md-maker") $skills
 
 Write-Host ""
+if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+    Write-Host "Claude Code (claude) was not found, so md-maker will convert locally only."
+    Write-Host "For AI repair of hard PDF pages, install it and log in once:"
+    Write-Host "    irm https://claude.ai/install.ps1 | iex"
+    Write-Host "    claude          (then /login)"
+    Write-Host ""
+}
 Write-Host "Done. Open a new terminal and run:  md-maker <file.pdf|file.docx>"

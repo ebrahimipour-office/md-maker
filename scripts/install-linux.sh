@@ -17,4 +17,11 @@ mkdir -p "$HOME/.claude/skills"
 cp -r "$repo/skill/md-maker" "$HOME/.claude/skills/"
 
 echo
+if ! command -v claude >/dev/null; then
+    echo "Claude Code (claude) was not found, so md-maker will convert locally only."
+    echo "For AI repair of hard PDF pages, install it and log in once:"
+    echo "    curl -fsSL https://claude.ai/install.sh | bash"
+    echo "    claude          (then /login)"
+    echo
+fi
 echo "Done. Run:  md-maker <file.pdf|file.docx>"

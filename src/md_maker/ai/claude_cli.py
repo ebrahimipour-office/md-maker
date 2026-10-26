@@ -4,16 +4,25 @@ Each call is a fresh, tool-less, single-turn session: the page image goes in
 as an image block over stream-json, and --json-schema makes the answer come
 back as structured output. The CLI uses whatever login the user has
 (subscription or API key), so md-maker never handles credentials.
+
+Windows: an npm install runs as `claude.cmd`, and cmd.exe mangles arguments
+holding newlines or & | < > ^ % !. So everything free-form (system prompt,
+page text) goes through a file or stdin, never the command line.
 """
 
 import base64
+import hashlib
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
+from pathlib import Path
 
 from .backend import AIError, AIResult
 from .prompts import SCHEMA
+
+_CMD_UNSAFE = set("\r\n&|<>^%!")
 
 
 def find_claude(configured: str = "") -> str | None:
@@ -34,6 +43,12 @@ class ClaudeCLI:
         self._tmp = tempfile.TemporaryDirectory(prefix="md-maker-")
         self.cwd = self._tmp.name
 
+    def _system_file(self, system: str) -> str:
+        path = Path(self.cwd) / f"system-{hashlib.sha256(system.encode()).hexdigest()[:16]}.txt"
+        if not path.exists():
+            path.write_text(system, encoding="utf-8")
+        return str(path)
+
     def _command(self, model, effort, system, budget_usd):
         cmd = [
             self.path, "-p",
@@ -41,7 +56,7 @@ class ClaudeCLI:
             "--input-format", "stream-json",
             "--output-format", "stream-json", "--verbose",
             "--json-schema", SCHEMA,
-            "--system-prompt", system,
+            "--system-prompt-file", self._system_file(system),
             "--tools", "",
             "--no-session-persistence",
             "--disable-slash-commands",
@@ -51,6 +66,8 @@ class ClaudeCLI:
             cmd += ["--effort", effort]
         if budget_usd:
             cmd += ["--max-budget-usd", f"{budget_usd:.4f}"]
+        if any(_CMD_UNSAFE & set(arg) for arg in cmd[1:]):
+            raise AIError("internal: command-line argument not safe for Windows cmd.exe")
         return cmd
 
     def run(self, *, model, effort, system, prompt, image=None, budget_usd=None) -> AIResult:
@@ -72,27 +89,31 @@ class ClaudeCLI:
         raise last
 
     def _once(self, model, effort, system, budget_usd, message) -> AIResult:
+        proc = subprocess.Popen(
+            self._command(model, effort, system, budget_usd),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=self.cwd,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
         try:
-            proc = subprocess.run(
-                self._command(model, effort, system, budget_usd),
-                input=message + "\n",
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                cwd=self.cwd,
-                timeout=self.timeout,
-            )
+            stdout, stderr = proc.communicate(message + "\n", timeout=self.timeout)
         except subprocess.TimeoutExpired:
+            _kill_tree(proc)
             raise AIError(f"{model}: no answer after {self.timeout}s") from None
         result = None
-        for line in proc.stdout.splitlines():
+        for line in stdout.splitlines():
             if line.startswith("{") and '"type":"result"' in line.replace(" ", ""):
                 try:
                     result = json.loads(line)
                 except json.JSONDecodeError:
                     pass
         if result is None:
-            err = (proc.stderr or proc.stdout).strip().splitlines()
+            err = (stderr or stdout).strip().splitlines()
             raise AIError(f"{model}: CLI exited with {proc.returncode}: {err[-1] if err else 'no output'}")
         out = result.get("structured_output")
         if result.get("is_error") or not isinstance(out, dict) or "markdown" not in out:
@@ -107,3 +128,11 @@ class ClaudeCLI:
             cost_usd=float(result.get("total_cost_usd") or 0),
             model=model,
         )
+
+
+def _kill_tree(proc: subprocess.Popen):
+    """Stop the CLI and its children (on Windows, claude.cmd starts node)."""
+    if sys.platform == "win32":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+    proc.kill()
+    proc.communicate()

@@ -43,6 +43,20 @@ to show the result. OCR data is bundled inside. PyInstaller can't
 cross-compile, so the Windows build must run on Windows. The same
 `scripts/build.py` builds a Linux bundle on Linux.
 
+### AI requirement
+
+AI repair needs Claude Code on the same machine, logged in once
+(run `claude`, then `/login`). The installers say so if it's missing.
+
+- **Windows:** both the native install (`claude.exe`) and the npm install
+  (`claude.cmd`) work. md-maker passes the prompt text through a file and
+  stdin, never the command line, so `cmd.exe` can't mangle Persian text or
+  special characters. The standalone `md-maker.exe` uses the `claude` on
+  `PATH` too, including when you drag files onto it. If `claude` isn't on
+  `PATH`, set `ai.claude_path` in the settings file
+  (`%APPDATA%\md-maker\config.toml`) to its full path.
+- Without Claude Code, md-maker prints one notice and converts locally.
+
 ## Use
 
 ```bash

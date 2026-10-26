@@ -198,28 +198,35 @@ def test_pipeline_polish_is_text_only(tmp_path):
 
 # -- the real CLI wrapper, against a fake `claude` executable -----------------
 
-FAKE_CLAUDE = """#!{python}
+FAKE_CLAUDE = """
 import json, os, sys
+args = sys.argv[1:]
 msg = json.loads(sys.stdin.readline())
-kinds = [c["type"] for c in msg["message"]["content"]]
-with open(os.environ["FAKE_CLAUDE_LOG"], "a") as f:
-    f.write(json.dumps({{"args": sys.argv[1:], "content": kinds}}) + "\\n")
-model = sys.argv[sys.argv.index("--model") + 1]
-print(json.dumps({{"type": "system", "subtype": "init"}}))
-print(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0.02,
-    "structured_output": {{"markdown": "# FAKE " + model + "\\n\\nبدنه", "confidence": "high", "notes": ""}}}}))
+system = open(args[args.index("--system-prompt-file") + 1], encoding="utf-8").read()
+with open(os.environ["FAKE_CLAUDE_LOG"], "a", encoding="utf-8") as f:
+    kinds = [c["type"] for c in msg["message"]["content"]]
+    f.write(json.dumps({"args": args, "content": kinds, "system": system}) + "\\n")
+model = args[args.index("--model") + 1]
+print(json.dumps({"type": "system", "subtype": "init"}))
+print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0.02,
+    "structured_output": {"markdown": "# FAKE " + model + "\\n\\nبدنه", "confidence": "high", "notes": ""}}))
 """
 
 
 @pytest.fixture
 def fake_claude(tmp_path, monkeypatch):
-    if sys.platform == "win32":
-        pytest.skip("fake CLI is a shebang script")
+    """A fake `claude` on PATH: a shebang script, or on Windows a claude.cmd
+    wrapper, which is how an npm install of Claude Code runs."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    exe = bin_dir / "claude"
-    exe.write_text(FAKE_CLAUDE.format(python=sys.executable))
-    exe.chmod(0o755)
+    script = bin_dir / "fake_claude.py"
+    script.write_text(FAKE_CLAUDE, encoding="utf-8")
+    if sys.platform == "win32":
+        (bin_dir / "claude.cmd").write_text(f'@"{sys.executable}" "{script}" %*\r\n')
+    else:
+        exe = bin_dir / "claude"
+        exe.write_text(f"#!{sys.executable}\n" + FAKE_CLAUDE, encoding="utf-8")
+        exe.chmod(0o755)
     log = tmp_path / "calls.jsonl"
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
@@ -230,8 +237,13 @@ def test_claude_cli_backend(fake_claude):
     s = config.load(None, {"ai": {"mode": "smart"}})
     r = ClaudeCLI(s).run(model="sonnet", effort="medium", system="sys", prompt="p", image=b"png", budget_usd=1.5)
     assert r.markdown.startswith("# FAKE sonnet") and r.cost_usd == 0.02
-    call = json.loads(fake_claude.read_text())
+    call = json.loads(fake_claude.read_text(encoding="utf-8"))
     assert call["content"] == ["image", "text"]
+    # free-form text reaches the CLI through a file, intact
+    system = prompts.system_prompt(True)
+    assert "می‌شود" in system and "\n" in system
+    ClaudeCLI(s).run(model="haiku", effort="", system=system, prompt="p")
+    assert json.loads(fake_claude.read_text(encoding="utf-8").splitlines()[1])["system"] == system
     for flag in ("--json-schema", "--no-session-persistence", "--max-budget-usd", "--effort"):
         assert flag in call["args"]
     assert "--bare" not in call["args"]
@@ -247,7 +259,7 @@ def test_cli_ai_end_to_end(fake_claude, tmp_path, capsys):
     out = tmp_path / "out.md"
     assert main([str(FIXTURES / "persian.pdf"), "-o", str(out), "--ai", "smart", "--report", "-q"]) == 0
     # the fake answer misses the page's words, so sonnet's result is retried with opus
-    models = [c["args"][c["args"].index("--model") + 1] for c in map(json.loads, fake_claude.read_text().splitlines())]
+    models = [c["args"][c["args"].index("--model") + 1] for c in map(json.loads, fake_claude.read_text(encoding="utf-8").splitlines())]
     assert models == ["sonnet", "opus"]
     assert out.read_text().startswith("# FAKE opus")
     report = json.loads(out.with_suffix(".report.json").read_text())
