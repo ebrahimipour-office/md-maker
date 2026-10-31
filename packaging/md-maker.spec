@@ -5,8 +5,9 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 datas, binaries, hiddenimports = [], [], []
 # pymupdf ships its layout model (ONNX) and pymupdf4llm its OCR decision
-# model as package data; pypandoc_binary ships pandoc itself.
-for pkg in ("pymupdf", "pymupdf4llm", "onnxruntime", "pypandoc"):
+# model as package data; pypandoc_binary ships pandoc itself;
+# hazm ships its word lists.
+for pkg in ("pymupdf", "pymupdf4llm", "onnxruntime", "pypandoc", "hazm"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b

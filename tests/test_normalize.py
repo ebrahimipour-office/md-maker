@@ -57,3 +57,8 @@ def test_reversed_line_detection_and_repair():
 def test_rtl_ratio():
     assert nz.is_rtl("سلام دنیا hello")
     assert not nz.is_rtl("hello world سلام")
+
+
+def test_fix_spacing_leaves_non_persian_alone():
+    line = "جمعهها می روند: [پیوند](https://a.com/x?a=1) نسخه 2.1 و ۵۰۰٬۰۰۰ ریال ، خوب ؟"
+    assert nz.fix_spacing(line) == "جمعه‌ها می‌روند: [پیوند](https://a.com/x?a=1) نسخه 2.1 و ۵۰۰٬۰۰۰ ریال، خوب؟"

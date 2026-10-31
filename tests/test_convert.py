@@ -30,7 +30,7 @@ def test_persian_pdf():
     assert md.startswith("# گزارش ماهانه پروژه")
     assert "## جدول هزینه" in md
     # mixed-direction line kept in reading order, half-spaces restored
-    assert f"در این گزارش، نسخه 2.1 از نرم افزار PayStar بررسی می{ZWNJ}شود و تاریخ آن ۱۳۹۹/۰۸/۰۲ است." in md
+    assert f"در این گزارش، نسخه 2.1 از نرم{ZWNJ}افزار PayStar بررسی می{ZWNJ}شود و تاریخ آن ۱۳۹۹/۰۸/۰۲ است." in md
     # paragraph wrapped over two PDF lines is joined
     assert "در فایل PDF به دو خط شکسته شود تا اتصال خطوط را هم بسنجیم." in md
     assert f"فایل{ZWNJ}ها" in md

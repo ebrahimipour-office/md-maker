@@ -158,7 +158,10 @@ reached) the local draft is kept and a warning printed. Results are cached
 per file, page, model and prompt version (`~/.cache/md-maker`), so reruns
 and interrupted runs don't pay twice. Costs are what the CLI reports; on a
 Claude subscription they count against your usage limits instead of being
-billed, but `budget_usd` still applies to them.
+billed, but `budget_usd` still applies to them. Each page's log line shows
+its tokens (input incl. prompt cache + output) and cost; at the end of a run
+md-maker prints calls, tokens and cost per stage (`polish`, `repair`,
+`transcribe`, `escalate`) and per resolved model id (e.g. `claude-sonnet-…`).
 
 ### Local engines
 
@@ -183,14 +186,14 @@ billed, but `budget_usd` still applies to them.
 |---|---|
 | Joined glyph shapes (`ﮔﺰﺍﺭﺵ`) | NFKC → `گزارش` |
 | Dropped half-space (`فایلها`) | ZWNJ re-inserted from glyph shapes, before NFKC |
-| Half-space became a space (`می شود`, `کتاب ها`, `رفته اند`) | prefix/suffix rules → `می‌شود` |
+| Half-space became a space (`می شود`, `کتاب ها`, `نرم افزار`), spaced punctuation (`بروم ، چرا ؟`) | [hazm](https://github.com/roshan-research/hazm)'s lexicon-based spacer, on Persian runs only (numbers, Latin and URLs untouched) |
 | Mirrored brackets (`)ریال(`) | `(ریال)` on RTL lines |
 | Whole text in visual order (reversed) | detected via common words, un-reversed |
 | Arabic `ي ك`, Arabic digits, kashida, bidi control marks | unified / removed |
 
 Known limits:
-- A half-space that a PDF turned into a plain space inside a compound word
-  (`نرم افزار`) can't be told apart from a real space, so it stays a space.
+- Compound words missing from hazm's word list keep a plain space where a
+  half-space was meant; hazm also joins some passives (`نوشته‌شده`).
 - OCR of Persian scans is usable but imperfect. Recognition quality swings
   with `--ocr-dpi` (in testing, 300 lost whole lines while 150 and 400 did
   not), Latin words inside Persian lines are often misread, and tables in

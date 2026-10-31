@@ -15,6 +15,8 @@ class AIResult:
     notes: str
     cost_usd: float
     model: str
+    input_tokens: int = 0  # incl. prompt-cache reads and writes
+    output_tokens: int = 0
 
 
 class Backend(Protocol):

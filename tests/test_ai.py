@@ -209,6 +209,8 @@ with open(os.environ["FAKE_CLAUDE_LOG"], "a", encoding="utf-8") as f:
 model = args[args.index("--model") + 1]
 print(json.dumps({"type": "system", "subtype": "init"}))
 print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 0.02,
+    "modelUsage": {"claude-" + model + "-9": {"inputTokens": 5, "cacheReadInputTokens": 100,
+                                             "cacheCreationInputTokens": 900, "outputTokens": 40}},
     "structured_output": {"markdown": "# FAKE " + model + "\\n\\nبدنه", "confidence": "high", "notes": ""}}))
 """
 
@@ -237,6 +239,7 @@ def test_claude_cli_backend(fake_claude):
     s = config.load(None, {"ai": {"mode": "smart"}})
     r = ClaudeCLI(s).run(model="sonnet", effort="medium", system="sys", prompt="p", image=b"png", budget_usd=1.5)
     assert r.markdown.startswith("# FAKE sonnet") and r.cost_usd == 0.02
+    assert (r.model, r.input_tokens, r.output_tokens) == ("claude-sonnet-9", 1005, 40)
     call = json.loads(fake_claude.read_text(encoding="utf-8"))
     assert call["content"] == ["image", "text"]
     # free-form text reaches the CLI through a file, intact
@@ -257,13 +260,17 @@ def test_claude_cli_missing(monkeypatch, tmp_path):
 
 def test_cli_ai_end_to_end(fake_claude, tmp_path, capsys):
     out = tmp_path / "out.md"
-    assert main([str(FIXTURES / "persian.pdf"), "-o", str(out), "--ai", "smart", "--report", "-q"]) == 0
+    assert main([str(FIXTURES / "persian.pdf"), "-o", str(out), "--ai", "smart", "--report"]) == 0
+    err = capsys.readouterr().err
+    assert "repair     claude-sonnet-9" in err and "escalate   claude-opus-9" in err
+    assert "    2 call(s)      2,010 in       80 out  $0.040" in err
     # the fake answer misses the page's words, so sonnet's result is retried with opus
     models = [c["args"][c["args"].index("--model") + 1] for c in map(json.loads, fake_claude.read_text(encoding="utf-8").splitlines())]
     assert models == ["sonnet", "opus"]
     assert out.read_text().startswith("# FAKE opus")
     report = json.loads(out.with_suffix(".report.json").read_text())
     assert report["pages"][0]["route"] == "repair" and report["cost_usd"] == 0.04
+    assert report["input_tokens"] == 2010 and report["pages"][0]["model"] == "claude-opus-9"
 
 
 def test_cli_missing_claude_falls_back(monkeypatch, tmp_path, capsys):

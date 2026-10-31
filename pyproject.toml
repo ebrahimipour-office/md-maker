@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "hazm>=0.12",
     "pymupdf>=2",
     "pypandoc-binary>=1.17",
 ]

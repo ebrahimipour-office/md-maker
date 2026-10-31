@@ -7,6 +7,7 @@ some files, whole lines in visual (reversed) order. These helpers undo that.
 
 import re
 import unicodedata
+from functools import cache
 
 ZWNJ = "‌"
 
@@ -33,12 +34,10 @@ _CHAR_MAP = str.maketrans(
 # Bullet glyphs seen in PDFs, including Symbol/Wingdings private-use code points.
 BULLETS = "•●▪■◦○◆►➢✓"
 
-_PREFIX_RE = re.compile(rf"(?<![{_ARABIC_LETTER}{ZWNJ}])(ن?می) +(?=[{_ARABIC_LETTER}])")
-_SUFFIX_RE = re.compile(
-    rf"(?<=[{_ARABIC_LETTER}]) +(ها|های|هایی|هایم|هایت|هایش|هایمان|هایتان|هایشان|ترین|تری|تر)"
-    rf"(?![{_ARABIC_LETTER}{ZWNJ}])"
-)
-_VERB_SUFFIX_RE = re.compile(rf"(?<=ه) +(ام|ای|ایم|اید|اند)(?![{_ARABIC_LETTER}{ZWNJ}])")
+# Persian words (with ، ؟ ؛) joined by spaces. Digits, Latin, URLs and
+# Markdown never fall inside a run: hazm would space out 2.1 or ۵۰۰٬۰۰۰.
+_FA_WORD = rf"(?:(?![٠-٩٪-٬۰-۹])[{_ARABIC_LETTER}{ZWNJ}])+"
+_FA_RUN_RE = re.compile(rf"{_FA_WORD}(?: +{_FA_WORD})*")
 _MIRRORED_RE = re.compile(r"\)([^()\n]*)\(")
 
 _COMMON = ["از", "به", "در", "که", "این", "را", "با", "است", "برای", "آن", "یک", "تا", "شده", "می"]
@@ -102,11 +101,17 @@ def normalize_chars(text: str) -> str:
     return text.translate(_CHAR_MAP)
 
 
+@cache
+def _hazm():
+    from hazm import Normalizer  # slow import (~1s): only when spacing is fixed
+
+    return Normalizer()
+
+
 def fix_spacing(text: str) -> str:
-    """Turn spaces that replaced a ZWNJ back into ZWNJ (می‌شود, کتاب‌ها, شده‌اند)."""
-    text = _PREFIX_RE.sub(rf"\1{ZWNJ}", text)
-    text = _SUFFIX_RE.sub(rf"{ZWNJ}\1", text)
-    return _VERB_SUFFIX_RE.sub(rf"{ZWNJ}\1", text)
+    """Fix half-spaces and punctuation spacing in Persian runs with hazm's
+    lexicon (می‌شود, کتاب‌ها, جمعه‌ها, شده‌اند, «بروم، چرا؟»)."""
+    return _FA_RUN_RE.sub(lambda m: _hazm().correct_spacing(m.group(0)), text)
 
 
 def fix_mirrored_brackets(line: str) -> str:

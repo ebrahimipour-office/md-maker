@@ -121,12 +121,17 @@ class ClaudeCLI:
             if "budget" in reason:
                 raise AIError(f"{model}: budget reached")
             raise AIError(f"{model}: {reason}: {str(result.get('result', ''))[:200]}")
+        # modelUsage is keyed by the resolved model id ("sonnet" -> claude-sonnet-…)
+        usage = result.get("modelUsage") or {}
+        tokens = lambda *keys: sum(int(u.get(k) or 0) for u in usage.values() for k in keys)
         return AIResult(
             markdown=out["markdown"],
             confidence=out.get("confidence", "medium"),
             notes=out.get("notes", ""),
             cost_usd=float(result.get("total_cost_usd") or 0),
-            model=model,
+            model=", ".join(usage) or model,
+            input_tokens=tokens("inputTokens", "cacheReadInputTokens", "cacheCreationInputTokens"),
+            output_tokens=tokens("outputTokens"),
         )
 
 

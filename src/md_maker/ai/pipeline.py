@@ -47,6 +47,8 @@ class PageResult:
     source: str = "local"  # local | ai | cache
     model: str = ""
     cost_usd: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
     score: float | None = None
     confidence: str = ""
     notes: str = ""
@@ -71,6 +73,25 @@ class Pipeline:
         self.cache = cache
         self.log = log or (lambda msg: None)
         self.system = prompts.system_prompt(settings.output.figure_notes)
+        # (stage, model) -> [calls, input tokens, output tokens, usd], for the whole run
+        self.usage: dict[tuple[str, str], list] = {}
+        self._usage_lock = threading.Lock()
+
+    def _record(self, stage: str, r: AIResult):
+        with self._usage_lock:
+            u = self.usage.setdefault((stage, r.model), [0, 0, 0, 0.0])
+            for i, v in enumerate((1, r.input_tokens, r.output_tokens, r.cost_usd)):
+                u[i] += v
+
+    def usage_lines(self) -> list[str]:
+        """Per stage and model: calls, tokens and cost (cache hits not counted)."""
+        rows = sorted(self.usage.items())
+        lines = [f"  {stage:<10} {model:<22} {c:>3} call(s)  {i:>9,} in  {o:>7,} out  ${usd:.3f}"
+                 for (stage, model), (c, i, o, usd) in rows]
+        if rows:
+            c, i, o, usd = (sum(v[k] for _, v in rows) for k in range(4))
+            lines.append(f"  {'total':<10} {'':<22} {c:>3} call(s)  {i:>9,} in  {o:>7,} out  ${usd:.3f}")
+        return lines
 
     # -- one page ---------------------------------------------------------
 
@@ -124,17 +145,21 @@ class Pipeline:
             score, problems = verify.score(md, job.draft, job.trusted)
             if result.confidence == "low":
                 problems.append("model unsure" + (f": {result.notes}" if result.notes else ""))
-            res.cost_usd += 0 if cached else result.cost_usd
+            if not cached:
+                self._record("escalate" if i else r.route, result)
+                res.cost_usd += result.cost_usd
+                res.input_tokens += result.input_tokens
+                res.output_tokens += result.output_tokens
             if best is None or score >= best[0]:
                 best = (score, md)
                 res.source = "cache" if cached else "ai"
-                res.model, res.score, res.confidence = model, score, result.confidence
+                res.model, res.score, res.confidence = result.model, score, result.confidence
                 res.notes, res.problems = result.notes, problems
                 res.error = ""
             if score >= self.s.ai.routing.min_verify_score and result.confidence != "low":
                 break
             if i + 1 < len(models):
-                self.log(f"  page {r.page + 1}: {model} scored {score:.2f} ({'; '.join(problems)}), "
+                self.log(f"  page {r.page + 1}: {result.model} scored {score:.2f} ({'; '.join(problems)}), "
                          f"retrying with {models[i + 1]}")
         if best is None:
             return job.draft, res
@@ -196,6 +221,8 @@ class Pipeline:
             "ai_pages": len(jobs),
             "fallbacks": sum(1 for j in jobs if results[j.report.page].source == "local"),
             "cost_usd": round(sum(r.cost_usd for r in results.values()), 4),
+            "input_tokens": sum(r.input_tokens for r in results.values()),
+            "output_tokens": sum(r.output_tokens for r in results.values()),
         }
         return md, report
 
@@ -205,7 +232,8 @@ def _progress_line(done: int, total: int, res: PageResult) -> str:
         status = f"kept local draft ({res.error or 'no result'})"
     else:
         status = f"{res.model} score {res.score:.2f}"
-        status += " (cached)" if res.source == "cache" else f" ${res.cost_usd:.3f}"
+        status += (" (cached)" if res.source == "cache"
+                   else f" {res.input_tokens:,}+{res.output_tokens:,} tok ${res.cost_usd:.3f}")
         if res.problems:
             status += f"  ! {'; '.join(res.problems)}"
     return f"  [{done}/{total}] page {res.page + 1:<4} {res.route:<10} {status}"

@@ -286,6 +286,8 @@ def _main(argv=None) -> int:
             rpath.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
             if not args.quiet:
                 print(f"report: {rpath}", file=sys.stderr)
+    if pipeline and pipeline.usage and not args.quiet:
+        print("AI usage by stage and model:", *pipeline.usage_lines(), sep="\n", file=sys.stderr)
     if pipeline and pipeline.budget.spent and not args.quiet:
         limit = f" of ${settings.ai.budget_usd:.2f} budget" if settings.ai.budget_usd else ""
         print(f"AI cost: ${pipeline.budget.spent:.3f}{limit}", file=sys.stderr)
