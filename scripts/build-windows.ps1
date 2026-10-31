@@ -1,8 +1,9 @@
-# Build a standalone md-maker for Windows: a folder with md-maker.exe that
-# runs on any Windows 10/11 PC without Python, OCR data included.
+# Build a standalone md-maker for Windows: a folder with md-maker.exe (CLI) and
+# md-maker-gui.exe (double-click GUI) that runs on any Windows 10/11 PC
+# without Python, OCR data included.
 #   powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
 #
-# Output: dist\md-maker\md-maker.exe and dist\md-maker-windows-amd64.zip
+# Output: dist\md-maker\md-maker[-gui].exe and dist\md-maker-windows-amd64.zip
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 

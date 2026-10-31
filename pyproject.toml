@@ -14,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 md-maker = "md_maker:main"
+md-maker-gui = "md_maker.gui:main"
 
 [build-system]
 requires = ["uv_build>=0.12.3,<0.13.0"]

@@ -37,7 +37,8 @@ powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
 ```
 
 This produces `dist\md-maker-windows-amd64.zip`, about 190 MB, mostly pandoc
-and the PDF layout model. Unzip it anywhere and run `md-maker\md-maker.exe`
+and the PDF layout model. Unzip it anywhere and double-click
+`md-maker\md-maker-gui.exe` for the GUI, or run `md-maker\md-maker.exe`
 from a terminal, or drag files onto it in Explorer; the window stays open
 to show the result. OCR data is bundled inside. PyInstaller can't
 cross-compile, so the Windows build must run on Windows. The same
@@ -56,6 +57,25 @@ AI repair needs Claude Code on the same machine, logged in once
   `PATH`, set `ai.claude_path` in the settings file
   (`%APPDATA%\md-maker\config.toml`) to its full path.
 - Without Claude Code, md-maker prints one notice and converts locally.
+
+### Linux .deb (no Python on the target PC)
+
+```bash
+uv run --with pyinstaller python scripts/build.py   # -> dist/md-maker_<version>_amd64.deb
+sudo apt install ./dist/md-maker_*_amd64.deb
+```
+
+Installs to `/opt/md-maker`, puts `md-maker` and `md-maker-gui` on `PATH`
+and adds **md-maker** to the applications menu.
+
+## GUI
+
+`md-maker-gui` (or `md-maker-gui.exe`, or the menu entry) opens a small
+window: add files or folders, optionally pick an output folder, choose the
+AI and OCR modes, then **Plan** (free preview of how each PDF page will be
+handled) or **Convert**. Everything the CLI prints, AI progress and cost
+included, shows up live in the log pane. The GUI runs the same code as the
+CLI, so the settings file applies to both.
 
 ## Use
 

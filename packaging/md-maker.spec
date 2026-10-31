@@ -1,4 +1,5 @@
-# PyInstaller spec for a standalone md-maker (no Python needed on the target).
+# PyInstaller spec for a standalone md-maker (no Python needed on the target):
+# md-maker (console CLI) and md-maker-gui (windowed) in one shared folder.
 # Build with scripts/build.py, which also bundles OCR data.
 from PyInstaller.utils.hooks import collect_all, collect_data_files
 
@@ -12,13 +13,13 @@ for pkg in ("pymupdf", "pymupdf4llm", "onnxruntime", "pypandoc"):
     hiddenimports += h
 datas += collect_data_files("md_maker")
 
-a = Analysis(
-    ["entry.py"],
-    datas=datas,
-    binaries=binaries,
-    hiddenimports=hiddenimports,
-    excludes=["tkinter", "matplotlib", "IPython"],
-)
-pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="md-maker", console=True)
-coll = COLLECT(exe, a.binaries, a.datas, name="md-maker")
+
+def analysis(script):
+    return Analysis([script], datas=datas, binaries=binaries, hiddenimports=hiddenimports,
+                    excludes=["matplotlib", "IPython"])
+
+
+a, g = analysis("entry.py"), analysis("gui_entry.py")
+cli = EXE(PYZ(a.pure), a.scripts, [], exclude_binaries=True, name="md-maker", console=True)
+gui = EXE(PYZ(g.pure), g.scripts, [], exclude_binaries=True, name="md-maker-gui", console=False)
+coll = COLLECT(cli, gui, a.binaries, a.datas, g.binaries, g.datas, name="md-maker")
